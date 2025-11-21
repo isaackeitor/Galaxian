@@ -1,0 +1,479 @@
+\documentclass[conference]{IEEEtran}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\lstset{
+    basicstyle=\ttfamily\footnotesize,
+    breaklines=true,
+    frame=single,
+    language=Python,
+    showstringspaces=false
+}
+
+\title{Entrenamiento y Optimización de Agentes de Aprendizaje por Refuerzo Profundo para Atari Galaxian}
+
+\author{
+\IEEEauthorblockN{Josué Isaac Morales González}
+\IEEEauthorblockA{Carné: 21116\\
+Universidad del Valle de Guatemala\\
+Proyecto Final - Reinforcement Learning\\
+Deep Q-Networks, A2C y Dueling DDQN con PER\\
+Entorno: ALE/Galaxian-v5 (Gymnasium)\\
+Fecha: 21 de noviembre de 2025}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Este proyecto implementa y evalúa tres algoritmos de Aprendizaje por Refuerzo Profundo (Deep RL) para dominar el juego Atari Galaxian: DQN (Deep Q-Network), A2C (Advantage Actor-Critic) y Dueling Double DQN con Prioritized Experience Replay (PER). Se realizó una evaluación exhaustiva de 12 modelos entrenados, identificando problemas de sobreentrenamiento y desarrollando estrategias de optimización. Se implementó soporte para aceleración GPU en Apple Silicon (MPS), sistemas de continuación de entrenamiento desde checkpoints, y ajuste fino de hiperparámetros. Los resultados demuestran que el modelo DQN entrenado con 2,500 episodios alcanza el rendimiento óptimo (2,554 puntos promedio), mientras que el entrenamiento extendido causa degradación significativa (-54.4\% en 6,500 episodios). El modelo Dueling DDQN+PER, tras 27,000 episodios, muestra mejora sostenida de 800 a 1,800 puntos, validando la robustez de la arquitectura avanzada.
+\end{abstract}
+
+\section{Introducción}
+
+El Aprendizaje por Refuerzo Profundo (Deep RL) ha revolucionado la capacidad de los agentes artificiales para dominar tareas complejas, desde juegos Atari hasta control robótico \cite{mnih2015human}. Este proyecto se enfoca en el juego \textit{Galaxian}, un shooter arcade que requiere toma de decisiones secuenciales en tiempo real bajo incertidumbre.
+
+\subsection{Objetivos}
+\begin{enumerate}
+    \item Implementar desde cero tres algoritmos de Deep RL: DQN, A2C y Dueling DDQN+PER
+    \item Evaluar sistemáticamente modelos entrenados con diferentes duraciones
+    \item Identificar y resolver problemas de sobreentrenamiento
+    \item Optimizar rendimiento computacional (GPU Apple Silicon)
+    \item Desarrollar estrategias de continuación de entrenamiento
+\end{enumerate}
+
+\subsection{Contribuciones}
+\begin{itemize}
+    \item Evaluación exhaustiva de 12 modelos con 110 ejecuciones totales
+    \item Identificación de punto óptimo de entrenamiento (2,500 episodios)
+    \item Soporte MPS para aceleración en GPU Apple Silicon
+    \item Sistema de continuación de entrenamiento con checkpoint loading
+    \item Estrategia de aceleración para arquitecturas avanzadas
+\end{itemize}
+
+\section{Metodología}
+
+\subsection{Entorno y Preprocesamiento}
+
+\textbf{Entorno:} ALE/Galaxian-v5 (Gymnasium)\\
+\textbf{Observaciones:} RGB frames (210 $\times$ 160 $\times$ 3)\\
+\textbf{Acciones:} 6 acciones discretas (minimal action set)
+
+\textbf{Pipeline de preprocesamiento:}
+\begin{enumerate}
+    \item \textit{Frame skipping}: 4 frames (ejecuta acción, observa cada 4 frames)
+    \item \textit{Conversión a escala de grises}: RGB → Gris
+    \item \textit{Redimensionamiento}: 210$\times$160 → 84$\times$84
+    \item \textit{Frame stacking}: Apilar últimos 4 frames
+    \item \textit{Normalización}: [0, 255] → [0, 1]
+\end{enumerate}
+
+Observación final: $(4, 84, 84)$ tensor (4 frames, canal-primero)
+
+\subsection{Arquitecturas Implementadas}
+
+\subsubsection{DQN (Deep Q-Network)}
+Arquitectura Nature DQN \cite{mnih2015human}:
+\begin{itemize}
+    \item \textbf{Backbone CNN:}
+    \begin{itemize}
+        \item Conv1: 32 filtros, kernel 8$\times$8, stride 4
+        \item Conv2: 64 filtros, kernel 4$\times$4, stride 2
+        \item Conv3: 64 filtros, kernel 3$\times$3, stride 1
+    \end{itemize}
+    \item \textbf{Fully Connected Head:}
+    \begin{itemize}
+        \item FC1: 3,136 → 512 + ReLU
+        \item FC2: 512 → 6 (Q-values)
+    \end{itemize}
+    \item \textbf{Técnicas:} Experience Replay (100K), Target Network
+\end{itemize}
+
+\textbf{Hiperparámetros DQN:}
+\begin{itemize}
+    \item Buffer: 100,000 transiciones
+    \item Batch: 32
+    \item Learning rate: $1 \times 10^{-4}$ (Adam)
+    \item Discount factor ($\gamma$): 0.99
+    \item Epsilon decay: 1.0 → 0.1 (300 episodios)
+    \item Target update: cada 1,000 pasos
+\end{itemize}
+
+\subsubsection{A2C (Advantage Actor-Critic)}
+Método de gradiente de política con baseline:
+\begin{itemize}
+    \item \textbf{Shared backbone:} Misma CNN que DQN
+    \item \textbf{Actor head:} FC → softmax (logits de acciones)
+    \item \textbf{Critic head:} FC → valor de estado $V(s)$
+    \item \textbf{Rollouts:} n-step returns (n=5)
+    \item \textbf{Advantage:} Generalized Advantage Estimation (GAE-$\lambda$, $\lambda$=0.95)
+\end{itemize}
+
+\textbf{Hiperparámetros A2C:}
+\begin{itemize}
+    \item Rollout length: 5 pasos
+    \item Learning rate: $2.5 \times 10^{-4}$ (RMSprop)
+    \item GAE $\lambda$: 0.95
+    \item Entropy coefficient: 0.01
+    \item Value loss coefficient: 0.5
+\end{itemize}
+
+\subsubsection{Dueling Double DQN con PER}
+Combina tres mejoras sobre DQN:
+\begin{itemize}
+    \item \textbf{Dueling Architecture:} Separa streams de valor y ventaja
+    \begin{equation}
+    Q(s,a) = V(s) + \left(A(s,a) - \frac{1}{|A|}\sum_{a'}A(s,a')\right)
+    \end{equation}
+    \item \textbf{Double Q-Learning:} Selección de acción (red online) separada de evaluación (red target)
+    \item \textbf{Prioritized Experience Replay:} Muestreo por prioridad basado en TD-error
+    \begin{equation}
+    P(i) = \frac{p_i^\alpha}{\sum_k p_k^\alpha}, \quad p_i = |\delta_i| + \epsilon
+    \end{equation}
+    Importance Sampling weights:
+    \begin{equation}
+    w_i = \left(\frac{1}{N} \cdot \frac{1}{P(i)}\right)^\beta
+    \end{equation}
+\end{itemize}
+
+\textbf{Hiperparámetros DDQN+PER:}
+\begin{itemize}
+    \item Buffer: 100,000 (segment trees para O(log n) sampling)
+    \item Batch: 32
+    \item Learning rate: $1 \times 10^{-4}$ (Adam)
+    \item PER $\alpha$: 0.6 (prioritization exponent)
+    \item PER $\beta$: 0.4 → 1.0 (annealing)
+    \item PER $\epsilon$: $1 \times 10^{-6}$
+\end{itemize}
+
+\section{Resultados Experimentales}
+
+\subsection{Protocolo de Evaluación}
+\begin{itemize}
+    \item \textbf{Modelos evaluados:} 12 (11 DQN + 1 DDQN+PER)
+    \item \textbf{Episodios por modelo:} 10 (total: 110 ejecuciones)
+    \item \textbf{Política:} Greedy pura ($\epsilon=0$)
+    \item \textbf{Métricas:} Promedio, máximo, mínimo, mediana
+\end{itemize}
+
+\subsection{Ranking de Modelos}
+
+\begin{table}[h]
+\centering
+\caption{Top 5 Modelos por Rendimiento Promedio}
+\label{tab:ranking}
+\begin{tabular}{@{}clrrr@{}}
+\toprule
+\textbf{Rank} & \textbf{Modelo} & \textbf{Eps} & \textbf{Prom.} & \textbf{Máx.} \\ \midrule
+\#1 & DQN & 2,500 & \textbf{2,554} & \textbf{4,630} \\
+\#2 & DQN & 2,000 & 2,388 & - \\
+\#3 & DQN & 4,500 & 2,259 & - \\
+\#4 & DQN & 4,000 & $\sim$2,100 & - \\
+\#5 & DQN & 3,500 & $\sim$2,000 & - \\
+\midrule
+\#11 & DQN & 6,500 & 1,165 & - \\
+\#12 & DDQN+PER & 24,600 & 847 & 1,350 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Análisis de Sobreentrenamiento}
+
+\textbf{Modelo óptimo:} DQN 2,500 episodios (2,554 puntos, max 4,630)
+
+La Figura \ref{fig:dqn_optimo} muestra la curva de aprendizaje del mejor modelo, con mejora sostenida desde 500 hasta alcanzar su pico alrededor del episodio 2,000-2,500.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\columnwidth]{dqn_optimo.png}
+\caption{Curva de aprendizaje DQN óptimo (2,500 episodios). Media móvil alcanza $\sim$3,100 puntos, con picos individuales hasta 6,800 puntos. Modelo con mejor rendimiento en evaluación (2,554 pts promedio).}
+\label{fig:dqn_optimo}
+\end{figure}
+
+\textbf{Evidencia de degradación:}
+\begin{itemize}
+    \item DQN 5,000 ep: $\sim$1,850 pts (-27.6\%)
+    \item DQN 6,000 ep: $\sim$1,600 pts (-37.4\%)
+    \item DQN 6,500 ep: 1,165 pts (-54.4\%) \textit{Colapso catastrófico}
+    \item DQN 7,000 ep: 1,748 pts (-31.6\%) \textit{Recuperación parcial}
+\end{itemize}
+
+\textbf{Fases de entrenamiento identificadas:}
+\begin{enumerate}
+    \item \textit{Aprendizaje} (0-2,500): Mejora progresiva, pico en 2,500
+    \item \textit{Plateau} (2,500-5,000): Fluctuaciones, ligera degradación
+    \item \textit{Degradación severa} (5,000-7,000): Overfitting evidente
+\end{enumerate}
+
+\subsection{Resultados DDQN+PER Inicial}
+
+El modelo DDQN+PER entrenado 24,600 episodios mostró el \textbf{peor rendimiento}:
+\begin{itemize}
+    \item Promedio: 847 puntos (-66.8\% vs óptimo)
+    \item Rango: 240-1,350 puntos (alta variabilidad)
+    \item Hipótesis: Sobreentrenamiento extremo, hiperparámetros no optimizados
+\end{itemize}
+
+Sin embargo, un análisis posterior del entrenamiento inicial (primeros 9,500 episodios) reveló un comportamiento estable sin colapsos, como se muestra en la Figura \ref{fig:ddqn_inicial}.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\columnwidth]{ddqn_per_inicial.png}
+\caption{Curva de aprendizaje DDQN+PER inicial (0-9,500 episodios). Media móvil estable alrededor de 600 puntos sin degradación.}
+\label{fig:ddqn_inicial}
+\end{figure}
+
+\section{Optimizaciones Implementadas}
+
+\subsection{Aceleración GPU - Apple Silicon (MPS)}
+
+PyTorch 1.12+ soporta Metal Performance Shaders (MPS) para GPUs Apple Silicon. Implementamos detección automática de dispositivo:
+
+\begin{lstlisting}
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
+\end{lstlisting}
+
+\textbf{Ganancia de velocidad:} $\sim$3-5x vs CPU para DDQN+PER (operaciones tensoriales intensivas)
+
+\subsection{Sistema de Continuación de Entrenamiento}
+
+Desarrollamos notebooks para continuar entrenamiento desde checkpoints:
+
+\textbf{Componentes guardados en checkpoint:}
+\begin{itemize}
+    \item Pesos de red Q y red target (state\_dict)
+    \item Estado del optimizador
+    \item Episodio actual y pasos globales
+    \item Historial de recompensas
+    \item Metadata (input\_shape, n\_actions)
+\end{itemize}
+
+\textbf{Estrategia de ajuste de hiperparámetros:}
+\begin{enumerate}
+    \item Cargar checkpoint
+    \item \textit{Mantener} hiperparámetros originales (buffer, batch, LR, gamma)
+    \item \textit{Reducir} epsilon (0.15 → 0.05, ya exploró)
+    \item Crear nuevo buffer (se llena durante entrenamiento)
+\end{enumerate}
+
+\textbf{Lección aprendida:} Modificar hiperparámetros durante continuación causó colapsos (DQN: 3,000 → 1,800 pts). Solución: usar valores originales probados.
+
+\subsection{Entrenamiento Continuo DDQN+PER}
+
+Reentrenamos DDQN+PER desde episodio 1,000 hasta 27,000:
+
+\textbf{Resultados:}
+\begin{itemize}
+    \item Eps 0-20,000: Media móvil estable $\sim$600-800 pts
+    \item Eps 20,000-27,000: \textbf{Explosión de mejora} 800 → 1,800 pts (+125\%)
+    \item Picos máximos: 5,000-6,000 puntos
+    \item \textbf{Conclusión:} Arquitectura robusta, mejora sostenida sin colapso
+\end{itemize}
+
+La Figura \ref{fig:ddqn_continuado} muestra la evolución completa del entrenamiento, evidenciando la mejora sostenida sin colapsos característicos del DQN simple.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\columnwidth]{ddqn_per_continuado.png}
+\caption{Entrenamiento DDQN+PER continuo (0-26,000 episodios). La media móvil muestra mejora sostenida de 600 a 1,800 puntos después del episodio 20,000, alcanzando picos de 6,000 puntos sin degradación.}
+\label{fig:ddqn_continuado}
+\end{figure}
+
+\subsection{Estrategia de Aceleración}
+
+Para acelerar la mejora observada en DDQN+PER (episodios 27,000+):
+
+\begin{table}[h]
+\centering
+\caption{Hiperparámetros Acelerados para DDQN+PER}
+\label{tab:aceleracion}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Parámetro} & \textbf{Original} & \textbf{Acelerado} & \textbf{Cambio} \\ \midrule
+Learning rate & $1e-4$ & $2.5e-4$ & +150\% \\
+Batch size & 32 & 64 & +100\% \\
+Buffer capacity & 100K & 80K & -20\% \\
+Epsilon inicial & 0.15 & 0.10 & -33\% \\
+Epsilon final & 0.05 & 0.02 & -60\% \\
+PER $\alpha$ & 0.6 & 0.7 & +17\% \\
+PER $\beta$ inicial & 0.4 & 0.5 & +25\% \\
+Target update & 1,000 & 1,200 & +20\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Justificación:}
+\begin{itemize}
+    \item \textit{LR alto:} Aprende 2.5x más rápido (modelo ya estable)
+    \item \textit{Batch grande:} Gradientes más estables, menos ruido
+    \item \textit{Buffer pequeño:} Olvida experiencias antiguas, enfoca en lo reciente
+    \item \textit{Epsilon bajo:} 90\% explotación (modelo ya sabe jugar)
+    \item \textit{PER $\alpha$ alto:} Prioriza más errores grandes (aprendizaje eficiente)
+\end{itemize}
+
+\textbf{Proyección:} Mejora esperada de 1,800 → 2,800 pts en 3,000 episodios ($\sim$2x velocidad original)
+
+\section{Problemas Técnicos Resueltos}
+
+\subsection{Compatibilidad Bilingüe de Checkpoints}
+
+\textbf{Problema:} Modelos iniciales usaban claves en español (\texttt{'red\_q'}, \texttt{'episodio'}) vs inglés (\texttt{'q\_network\_state'}, \texttt{'episode'})
+
+\textbf{Solución:} Detección automática de idioma en cargado de checkpoints:
+\begin{lstlisting}
+if 'red_q' in checkpoint:
+    # Checkpoint en espanol
+    model.load_state_dict(checkpoint['red_q'])
+elif 'q_network_state' in checkpoint:
+    # Checkpoint en ingles
+    model.load_state_dict(checkpoint['q_network_state'])
+\end{lstlisting}
+
+\subsection{Arquitectura Dueling Incompatible}
+
+\textbf{Problema:} DDQN+PER usa streams separados (\texttt{stream\_valor}, \texttt{stream\_ventaja}) incompatibles con DQN
+
+\textbf{Solución:} Implementación de clase separada \texttt{DuelingDDQN} con agregación correcta:
+\begin{lstlisting}
+V = self.value_stream(features)  # (B, 1)
+A = self.advantage_stream(features)  # (B, 6)
+Q = V + (A - A.mean(dim=1, keepdim=True))
+\end{lstlisting}
+
+\subsection{Manejo de Layouts de Observación}
+
+\textbf{Problema:} Wrappers pueden retornar $(C, H, W)$ o $(H, W, C)$
+
+\textbf{Solución:} Detección automática y permutación en \texttt{forward()}:
+\begin{lstlisting}
+if x.shape[1] != expected_c and x.shape[-1] == expected_c:
+    x = x.permute(0, 3, 1, 2)  # NHWC -> NCHW
+\end{lstlisting}
+
+\section{Conclusiones y Trabajo Futuro}
+
+\subsection{Conclusiones}
+
+\begin{enumerate}
+    \item \textbf{Punto óptimo de entrenamiento:} 2,500 episodios para DQN simple (2,554 pts promedio, máx 4,630)
+
+    \item \textbf{Sobreentrenamiento severo:} Degradación de hasta -54.4\% después de 5,000 episodios. El entrenamiento extendido NO mejora rendimiento.
+
+    \item \textbf{Arquitecturas avanzadas requieren más tiempo:} DDQN+PER fracasó inicialmente (847 pts @ 24K eps) pero mostró mejora sostenida con entrenamiento continuo (1,800 pts @ 27K eps).
+
+    \item \textbf{Robustez de Dueling DDQN+PER:} Sin colapsos observados en 27,000 episodios, mejora sostenida +125\% (800→1,800).
+
+    \item \textbf{Importancia de hiperparámetros:} Modificaciones durante continuación causaron colapsos. Valores originales probados son críticos.
+
+    \item \textbf{GPU Apple Silicon efectiva:} MPS proporciona 3-5x aceleración vs CPU para redes convolucionales profundas.
+\end{enumerate}
+
+\subsection{Trabajo Futuro}
+
+\begin{enumerate}
+    \item \textbf{Early Stopping:} Implementar validación periódica (cada 500 eps) con criterio de parada automático
+
+    \item \textbf{Regularización:} Explorar dropout, weight decay, layer normalization para prevenir overfitting
+
+    \item \textbf{Ensemble Methods:} Combinar múltiples modelos (DQN 2000, 2500, 4500) para reducir varianza
+
+    \item \textbf{Análisis de Representaciones:} Visualizar activaciones de CNN en modelos óptimos vs sobreentrenados
+
+    \item \textbf{Transfer Learning:} Evaluar si características aprendidas en Galaxian transfieren a otros shooters (Space Invaders, Breakout)
+
+    \item \textbf{Curriculum Learning:} Entrenar con dificultad progresiva (ajustar velocidad de enemigos)
+
+    \item \textbf{Comparación con Rainbow DQN:} Implementar combinación de todas las mejoras (Dueling + Double + PER + Distributional + Noisy Nets + Multi-step)
+\end{enumerate}
+
+\subsection{Recomendaciones para Producción}
+
+\begin{itemize}
+    \item \textbf{Modelo recomendado:} DQN 2,500 episodios
+    \item \textbf{Evaluación:} $\epsilon = 0$ (greedy puro)
+    \item \textbf{Monitoreo:} Registrar media móvil (100 eps) para detectar degradación
+    \item \textbf{Límite de entrenamiento:} No exceder 3,000 episodios sin validación
+    \item \textbf{Arquitecturas avanzadas:} DDQN+PER viable con 25,000+ episodios y monitoreo continuo
+\end{itemize}
+
+\section{Código y Reproducibilidad}
+
+\textbf{Repositorio:} Disponible en Lab-10 (código fuente completo)
+
+\textbf{Notebooks principales:}
+\begin{itemize}
+    \item \texttt{ProyectoFinal\_RL\_MPS.ipynb}: Implementaciones base (DQN, A2C, DDQN+PER) con soporte MPS
+    \item \texttt{DQN\_Continuar\_Entrenamiento.ipynb}: Continuación DQN desde checkpoints
+    \item \texttt{DDQN\_Continuar\_Entrenamiento.ipynb}: Continuación DDQN+PER acelerada
+\end{itemize}
+
+\textbf{Scripts de evaluación:}
+\begin{itemize}
+    \item \texttt{play\_dqn.py}: Testing de modelos DQN
+    \item \texttt{play\_ddqn\_per.py}: Testing de modelos DDQN+PER
+    \item \texttt{dqn\_model.py}, \texttt{ddqn\_per\_model.py}: Arquitecturas
+    \item \texttt{dqn\_policy.py}, \texttt{ddqn\_per\_policy.py}: Wrappers de política
+\end{itemize}
+
+\textbf{Dependencias principales:}
+\begin{itemize}
+    \item PyTorch 2.0+ (con soporte MPS)
+    \item Gymnasium 0.29+
+    \item ALE-Py (Atari Learning Environment)
+    \item NumPy, Matplotlib, OpenCV
+\end{itemize}
+
+\textbf{Comando de instalación:}
+\begin{lstlisting}[language=bash]
+pip install gymnasium[atari] ale-py autorom \
+    torch torchvision imageio imageio-ffmpeg
+AutoROM --accept-license
+\end{lstlisting}
+
+\section*{Agradecimientos}
+
+Este proyecto fue desarrollado como parte del curso de Reinforcement Learning. Agradecemos a la comunidad de Gymnasium y OpenAI por proporcionar el framework de entrenamiento, y a DeepMind por la arquitectura Nature DQN que sirvió de base.
+
+\begin{thebibliography}{9}
+
+\bibitem{mnih2015human}
+Mnih, V., et al. (2015).
+\textit{Human-level control through deep reinforcement learning.}
+Nature, 518(7540), 529-533.
+
+\bibitem{wang2016dueling}
+Wang, Z., et al. (2016).
+\textit{Dueling Network Architectures for Deep Reinforcement Learning.}
+ICML.
+
+\bibitem{schaul2015prioritized}
+Schaul, T., et al. (2015).
+\textit{Prioritized Experience Replay.}
+arXiv:1511.05952.
+
+\bibitem{vanhassselt2016deep}
+van Hasselt, H., et al. (2016).
+\textit{Deep Reinforcement Learning with Double Q-learning.}
+AAAI.
+
+\bibitem{mnih2016asynchronous}
+Mnih, V., et al. (2016).
+\textit{Asynchronous Methods for Deep Reinforcement Learning.}
+ICML.
+
+\end{thebibliography}
+
+\end{document}

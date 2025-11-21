@@ -1,0 +1,23 @@
+# Galaxian Reinforcement Learning Environment
+# Core RL dependencies
+gymnasium[atari]==0.29.1
+ale-py==0.8.1
+autorom[accept-rom-license]==0.6.1
+
+# Deep Learning
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Utilities
+numpy>=1.24.0
+matplotlib>=3.7.0
+tqdm>=4.65.0
+opencv-python>=4.8.0
+
+# Video/Image processing
+imageio>=2.31.0
+imageio-ffmpeg>=0.4.9
+
+# Development tools (optional)
+ipython>=8.12.0
+jupyter>=1.0.0

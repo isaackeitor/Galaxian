@@ -1,0 +1,121 @@
+=========================================================================
+🔧 CONFIGURACIÓN CORREGIDA - DQN CONTINUAR ENTRENAMIENTO
+=========================================================================
+
+ANÁLISIS DEL PROBLEMA:
+- Episodio 1800: ~3000 puntos (pico máximo)
+- Episodio 2500: ~2800 puntos (cayendo)
+- Episodio 4000: ~2200 puntos (caída del 27%)
+
+CAUSA: Hiperparámetros DEMASIADO CONSERVADORES
+- Learning rate 1e-4: MUY BAJO, el modelo dejó de aprender
+- Buffer 200K: Demasiado grande, experiencias muy antiguas
+- Batch 128: Demasiado grande, updates muy lentos
+- Target update 2500: Targets se actualizan muy lento
+- Gamma 0.995: Valora demasiado el futuro lejano
+
+=========================================================================
+✅ SOLUCIÓN: HIPERPARÁMETROS BALANCEADOS
+=========================================================================
+
+Reemplaza la celda de configuración con esto:
+
+```python
+red_mejorada = continuar_entrenamiento_dqn(
+    ruta_checkpoint=RUTA_CHECKPOINT,
+    directorio_checkpoints=DIRECTORIO_NUEVO,
+
+    # Episodios adicionales
+    episodios_adicionales=2000,          # 2000 episodios para probar
+
+    # ⚡ HIPERPARÁMETROS BALANCEADOS
+    capacidad_replay=100_000,            # ⬇️ Moderado (antes 200K)
+    tam_lote=64,                         # ⬇️ Moderado (antes 128)
+    factor_descuento=0.99,               # ⬇️ Estándar (antes 0.995)
+    tasa_aprendizaje=2.5e-4,             # ⬆️⬆️ MÁS ALTO (antes 1e-4)
+
+    # Exploración balanceada
+    epsilon_inicial=0.2,                 # 20% exploración
+    epsilon_final=0.05,                  # 5% exploración final
+    episodios_decaimiento_eps=1200,      # Más rápido
+
+    # Updates más frecuentes
+    intervalo_actualizacion_target=1500, # ⬇️ Más frecuente (antes 2500)
+    pasos_inicio_entrenamiento=3_000,    # ⬇️ Más temprano (antes 5000)
+
+    # Guardado
+    intervalo_guardado=200,
+    intervalo_graficas=200,
+
+    semilla_aleatoria=42,
+)
+```
+
+=========================================================================
+📊 CAMBIOS CLAVE Y POR QUÉ FUNCIONARÁN
+=========================================================================
+
+| Parámetro          | Antes (MALO) | Ahora (MEJOR) | Razón                      |
+|--------------------|--------------|---------------|----------------------------|
+| learning_rate      | 1e-4         | 2.5e-4 ⬆️⬆️   | Aprende 2.5x MÁS RÁPIDO   |
+| capacidad_replay   | 200K         | 100K ⬇️       | Menos memoria antigua      |
+| tam_lote           | 128          | 64 ⬇️         | Updates más frecuentes     |
+| factor_descuento   | 0.995        | 0.99 ⬇️       | Valora más presente        |
+| target_update      | 2500         | 1500 ⬇️       | Targets más actualizados   |
+| epsilon_inicial    | 0.3          | 0.2 ⬇️        | Menos random inicial       |
+| epsilon_final      | 0.1          | 0.05 ⬇️       | Más greedy al final        |
+
+=========================================================================
+🎯 RESULTADOS ESPERADOS
+=========================================================================
+
+Episodio 1800 (cargado):  ~3000 puntos (punto de partida)
+Episodio 2200:            ~3100 puntos ⬆️
+Episodio 2600:            ~3300 puntos ⬆️⬆️
+Episodio 3000:            ~3400 puntos ⬆️⬆️ (MEJORA SOSTENIDA)
+Episodio 3800:            ~3500 puntos ⬆️⬆️⬆️
+
+El modelo debería MEJORAR gradualmente sin caídas.
+
+=========================================================================
+⚠️ SI NO FUNCIONA - PLAN B (CONFIGURACIÓN AGRESIVA)
+=========================================================================
+
+Si después de 500 episodios no ves mejora, usa esto:
+
+```python
+red_mejorada = continuar_entrenamiento_dqn(
+    ruta_checkpoint=RUTA_CHECKPOINT,
+    directorio_checkpoints=DIRECTORIO_NUEVO,
+    episodios_adicionales=1500,
+
+    # CONFIGURACIÓN MUY AGRESIVA
+    capacidad_replay=50_000,             # Buffer PEQUEÑO
+    tam_lote=32,                         # Batch PEQUEÑO
+    factor_descuento=0.99,
+    tasa_aprendizaje=5e-4,               # ⬆️⬆️⬆️ LR MUY ALTO
+
+    epsilon_inicial=0.15,                # Poca exploración
+    epsilon_final=0.02,                  # Casi greedy puro
+    episodios_decaimiento_eps=800,
+
+    intervalo_actualizacion_target=1000, # Updates MUY frecuentes
+    pasos_inicio_entrenamiento=2_000,
+
+    intervalo_guardado=150,
+    intervalo_graficas=150,
+    semilla_aleatoria=42,
+)
+```
+
+=========================================================================
+💡 RECOMENDACIÓN FINAL
+=========================================================================
+
+1. CARGAR el checkpoint del episodio 1800 (pico de ~3000 puntos)
+2. USAR la configuración BALANCEADA primero
+3. MONITOREAR cada 200 episodios
+4. SI cae de nuevo → DETENER y usar Plan B (agresiva)
+5. SI mejora → ¡MANTENER y extender entrenamiento!
+
+=========================================================================
